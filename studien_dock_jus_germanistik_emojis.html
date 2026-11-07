@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="de" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>📚 Studien-Dock | Jus & Germanistik</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    window.SUPABASE_URL = 'https://axhvkrzuwczdkccxxhmo.supabase.co';
+    window.SUPABASE_KEY = 'sb_publishable__G6SQye1XgItYVtFfqU2Xw_naxxqC7n';
+    window.supabaseClient = window.supabase
+      ? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_KEY)
+      : null;
+
+    // Entspricht der aktuell gezeigten Tabellenstruktur:
+    // app_data(id text NOT NULL, created_at timestamptz, text text NOT NULL,
+    // content jsonb), zusammengesetzter PK (id, text).
+    const CLOUD_ID = 'user_app_state';
+    const CLOUD_KIND = 'study_dock_state';
+
+    window.saveToCloud = async function(payload) {
+      if (!window.supabaseClient) throw new Error('Supabase Client ist nicht initialisiert.');
+      const { error } = await window.supabaseClient
+        .from('app_data')
+        .upsert(
+          { id: CLOUD_ID, text: CLOUD_KIND, content: payload },
+          { onConflict: 'id,text' }
+        );
+      if (error) throw error;
+    };
+
+    window.loadFromCloud = async function() {
+      if (!window.supabaseClient) throw new Error('Supabase Client ist nicht initialisiert.');
+      const { data, error } = await window.supabaseClient
+        .from('app_data')
+        .select('content')
+        .eq('id', CLOUD_ID)
+        .eq('text', CLOUD_KIND)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.content ?? null;
+    };
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { -webkit-tap-highlight-color: transparent; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f140e; }
+    ::-webkit-scrollbar-thumb { background: #394934; border-radius: 3px; }
+    .emoji { font-size: 1.15em; }
+  </style>
+</head>
+
+<body class="h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 font-sans">
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between shadow-lg shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-indigo-900/40 border border-indigo-500/50 flex items-center justify-center text-xl">📚</div>
+      <div>
+        <h1 class="font-bold tracking-wider text-sm uppercase flex items-center gap-2">
+          STUDIEN-DOCK <span class="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">⚖️ JUS · ✍️ GERMANISTIK</span>
+        </h1>
+        <p class="text-[11px] text-slate-400 font-mono">✨ LERNKARTEN · THEMEN · WIEDERHOLUNG</p>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="app.openNewFolderModal()" class="px-3 py-1.5 rounded-md bg-indigo-700 hover:bg-indigo-600 text-xs font-bold">📂 Thema</button>
+      <button onclick="app.openNewCardModal()" class="px-3 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-xs font-bold text-indigo-300">📝 Karte</button>
+    </div>
+  </header>
+
+  <main id="main-content" class="flex-1 overflow-y-auto p-4 md:p-6 pb-24"></main>
+
+  <nav class="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 px-2 py-2 z-30 flex justify-around items-center">
+    <button onclick="app.switchTab('topics')" id="nav-topics" class="nav-btn flex flex-col items-center py-1 px-3 rounded-lg text-indigo-300">
+      <span class="text-lg">📂</span><span class="text-[10px] font-semibold mt-1">Themen</span>
+    </button>
+    <button onclick="app.switchTab('quiz')" id="nav-quiz" class="nav-btn flex flex-col items-center py-1 px-3 rounded-lg text-slate-400">
+      <span class="text-lg">🧠</span><span class="text-[10px] font-semibold mt-1">Abfrage</span>
+    </button>
+    <button onclick="app.switchTab('outline')" id="nav-outline" class="nav-btn flex flex-col items-center py-1 px-3 rounded-lg text-slate-400">
+      <span class="text-lg">🗂️</span><span class="text-[10px] font-semibold mt-1">Lernplan</span>
+    </button>
+    <button onclick="app.switchTab('stats')" id="nav-stats" class="nav-btn flex flex-col items-center py-1 px-3 rounded-lg text-slate-400">
+      <span class="text-lg">☁️</span><span class="text-[10px] font-semibold mt-1">Sync</span>
+    </button>
+  </nav>
+
+  <!-- Neues Thema -->
+  <div id="modal-folder" class="fixed inset-0 bg-black/80 z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-5 space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="font-bold">🌷 Neues Lernthema</h3>
+        <button onclick="app.closeModal('modal-folder')" class="text-slate-400 text-lg">✖</button>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">🎓 Studienfach</label>
+        <select id="folder-subject" onchange="app.updateCategoryOptions()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+          <option value="Jus">⚖️ Jus</option>
+          <option value="Germanistik">✍️ Germanistik</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">📌 Thema / Lehrveranstaltung</label>
+        <input id="folder-name" placeholder="z. B. ABGB – Vertragsrecht oder Mittelhochdeutsch" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">🧩 Unterbereich</label>
+        <select id="folder-category" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"></select>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-800 pt-3">
+        <button onclick="app.closeModal('modal-folder')" class="px-4 py-2 rounded-lg bg-slate-800 text-xs">Abbrechen</button>
+        <button onclick="app.saveFolderDirect()" class="px-4 py-2 rounded-lg bg-indigo-600 text-xs font-bold">✨ Erstellen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Neue Lernkarte -->
+  <div id="modal-card" class="fixed inset-0 bg-black/80 z-50 hidden items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-lg w-full p-5 space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="font-bold">🪄 Neue Lernkarte</h3>
+        <button onclick="app.closeModal('modal-card')" class="text-slate-400 text-lg">✖</button>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">📂 Lernthema</label>
+        <select id="card-folder-id" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"></select>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">❔ Frage / Begriff / Prüfungsproblem</label>
+        <textarea id="card-front" rows="3" placeholder="Was möchtest du lernen?" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"></textarea>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-indigo-300 mb-1">💡 Antwort / Definition / Lösungsschema</label>
+        <textarea id="card-back" rows="4" placeholder="Deine Antwort, Definition oder dein Prüfungsschema ..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm"></textarea>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-800 pt-3">
+        <button onclick="app.closeModal('modal-card')" class="px-4 py-2 rounded-lg bg-slate-800 text-xs">Abbrechen</button>
+        <button onclick="app.saveCardDirect()" class="px-4 py-2 rounded-lg bg-indigo-600 text-xs font-bold">💾 Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SUBJECT_CATEGORIES = {
+      Jus: [
+        '📜 Öffentliches Recht',
+        '⚖️ Zivilrecht',
+        '🚨 Strafrecht',
+        '🇪🇺 Europarecht & Völkerrecht',
+        '🏛️ Rechtsgeschichte',
+        '🧠 Methodik & Prüfungsschemata',
+        '📚 Sonstiges'
+      ],
+      Germanistik: [
+        '📖 Neuere deutsche Literatur',
+        '🏰 Ältere deutsche Literatur / Mediävistik',
+        '🗣️ Sprachwissenschaft / Linguistik',
+        '🔤 Grammatik & Sprachgeschichte',
+        '📝 Textanalyse & Interpretation',
+        '🔎 Theorie & Methodik',
+        '📚 Sonstiges'
+      ]
+    };
+
+    class App {
+      constructor() {
+        this.folders = [];
+        this.cards = [];
+        this.documents = [];
+        this.quizQueue = [];
+        this.quizIndex = 0;
+        this.quizFlipped = false;
+        this.currentTab = 'topics';
+      }
+
+      async init() {
+        try {
+          const cloudData = await window.loadFromCloud();
+          if (cloudData && Array.isArray(cloudData.folders)) {
+            this.folders = cloudData.folders;
+            this.cards = cloudData.cards || [];
+            this.documents = cloudData.documents || [];
+          }
+        } catch (error) {
+          console.error('Cloud laden fehlgeschlagen:', error);
+          alert('☁️ Cloud-Daten konnten nicht geladen werden. Details stehen in der Browser-Konsole.');
+        }
+        this.switchTab('topics');
+      }
+
+      async syncToCloud() {
+        await window.saveToCloud({
+          folders: this.folders,
+          cards: this.cards,
+          documents: this.documents
+        });
+      }
+
+      async safeSync() {
+        try {
+          await this.syncToCloud();
+          return true;
+        } catch (error) {
+          console.error('Cloud-Sync fehlgeschlagen:', error);
+          alert('❌ Sync fehlgeschlagen: ' + (error.message || error));
+          return false;
+        }
+      }
+
+      switchTab(tab) {
+        this.currentTab = tab;
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+          btn.classList.remove('text-indigo-300', 'bg-slate-800/50');
+          btn.classList.add('text-slate-400');
+        });
+        const active = document.getElementById(`nav-${tab}`);
+        if (active) {
+          active.classList.add('text-indigo-300', 'bg-slate-800/50');
+          active.classList.remove('text-slate-400');
+        }
+
+        const main = document.getElementById('main-content');
+        if (tab === 'topics') this.renderTopics(main);
+        else if (tab === 'quiz') this.renderQuiz(main);
+        else if (tab === 'outline') this.renderOutline(main);
+        else if (tab === 'stats') this.renderStats(main);
+      }
+
+      renderTopics(container) {
+        let html = `<div class="max-w-4xl mx-auto space-y-5">
+          <div class="flex items-center justify-between">
+            <div><h2 class="text-xl font-bold">📚 Meine Lernthemen</h2><p class="text-xs text-slate-400 mt-1">Sortiert nach Studienfach und Bereich ✨</p></div>
+            <button onclick="app.openNewFolderModal()" class="px-3 py-2 bg-indigo-700 rounded-lg text-xs font-bold">➕ Thema</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
+        if (!this.folders.length) {
+          html += `<div class="col-span-full bg-slate-900 border border-slate-800 rounded-xl p-6 text-center text-slate-400">🌱 Noch keine Themen angelegt. Erstelle dein erstes Lernthema!</div>`;
+        } else {
+          this.folders.forEach(folder => {
+            const count = this.cards.filter(card => card.folderId === folder.id).length;
+            const icon = folder.subject === 'Jus' ? '⚖️' : '✍️';
+            html += `<div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
+              <div class="flex justify-between items-start gap-3">
+                <div>
+                  <div class="text-xs text-indigo-300 mb-1">${icon} ${this.escapeHtml(folder.subject || 'Studium')} · ${this.escapeHtml(folder.category || '')}</div>
+                  <h3 class="font-bold text-slate-100">${this.escapeHtml(folder.name)}</h3>
+                  <p class="text-xs text-slate-400 mt-2">🗃️ ${count} Lernkarte${count === 1 ? '' : 'n'}</p>
+                </div>
+                <button onclick="app.startQuizForFolder('${folder.id}')" class="px-3 py-2 bg-indigo-800 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold">🧠 Lernen</button>
+              </div>
+            </div>`;
+          });
+        }
+        container.innerHTML = html + `</div></div>`;
+      }
+
+      renderQuiz(container) {
+        if (!this.cards.length) {
+          container.innerHTML = `<div class="max-w-xl mx-auto text-center py-12 text-slate-400">🫧 Noch keine Lernkarten. Lege zuerst eine Karte an!</div>`;
+          return;
+        }
+        if (!this.quizQueue.length || this.quizIndex >= this.quizQueue.length) {
+          this.quizQueue = [...this.cards];
+          this.quizIndex = 0;
+        }
+        const card = this.quizQueue[this.quizIndex];
+        if (!card) {
+          container.innerHTML = `<div class="text-center py-12 text-slate-400">🌸 Keine Karten in der Abfrage.</div>`;
+          return;
+        }
+        const topic = this.folders.find(f => f.id === card.folderId)?.name || 'Lernkarte';
+        container.innerHTML = `<div class="max-w-xl mx-auto space-y-4">
+          <div class="text-center">
+            <p class="text-xs font-mono text-indigo-300">🧠 Karte ${this.quizIndex + 1} von ${this.quizQueue.length}</p>
+            <p class="text-xs text-slate-400 mt-1">📂 ${this.escapeHtml(topic)}</p>
+          </div>
+          <button onclick="app.flipQuizCard()" class="w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 min-h-[240px] flex flex-col gap-4 items-center justify-center text-center shadow-lg hover:border-indigo-500 transition">
+            <span class="text-2xl">${this.quizFlipped ? '💡' : '❔'}</span>
+            <p class="text-lg font-medium whitespace-pre-wrap">${this.escapeHtml(this.quizFlipped ? card.back : card.front)}</p>
+            <span class="text-xs text-slate-500">${this.quizFlipped ? 'Antwortseite · Tippen zum Zurückdrehen' : 'Frage · Tippen zum Aufdecken'}</span>
+          </button>
+          <div class="grid grid-cols-2 gap-3">
+            <button onclick="app.flipQuizCard()" class="py-3 bg-slate-800 border border-slate-700 rounded-lg text-xs font-bold">🔄 Umdrehen</button>
+            <button onclick="app.answerQuiz()" class="py-3 bg-indigo-600 rounded-lg text-xs font-bold">➡️ Nächste Karte</button>
+          </div>
+        </div>`;
+      }
+
+      renderOutline(container) {
+        const subjects = ['Jus', 'Germanistik'];
+        let html = `<div class="max-w-3xl mx-auto space-y-5"><div><h2 class="text-xl font-bold">🗂️ Lernübersicht</h2><p class="text-xs text-slate-400 mt-1">Deine Fächer, Themen und Karteikarten im Überblick 🌷</p></div>`;
+        subjects.forEach(subject => {
+          const topics = this.folders.filter(f => f.subject === subject);
+          const cardsCount = topics.reduce((sum, f) => sum + this.cards.filter(c => c.folderId === f.id).length, 0);
+          html += `<section class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div class="flex justify-between items-center mb-3"><h3 class="font-bold">${subject === 'Jus' ? '⚖️ Jus' : '✍️ Germanistik'}</h3><span class="text-xs text-slate-400">${topics.length} Themen · ${cardsCount} Karten</span></div>`;
+          if (!topics.length) html += `<p class="text-xs text-slate-500">🌱 Hier sind noch keine Themen.</p>`;
+          else html += `<ul class="space-y-2">${topics.map(f => `<li class="flex justify-between gap-3 text-sm border-t border-slate-800 pt-2"><span>📌 ${this.escapeHtml(f.name)} <span class="text-xs text-slate-500">(${this.escapeHtml(f.category || '')})</span></span><span class="text-indigo-300">${this.cards.filter(c => c.folderId === f.id).length} 📝</span></li>`).join('')}</ul>`;
+          html += `</section>`;
+        });
+        container.innerHTML = html + `</div>`;
+      }
+
+      renderStats(container) {
+        container.innerHTML = `<div class="max-w-xl mx-auto space-y-4">
+          <h2 class="text-xl font-bold">☁️ Statistik & Sync</h2>
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4 shadow">
+            <div class="flex justify-between border-b border-slate-800 pb-2"><span class="text-sm text-slate-400">📂 Lernthemen</span><span class="font-bold text-indigo-300">${this.folders.length}</span></div>
+            <div class="flex justify-between border-b border-slate-800 pb-2"><span class="text-sm text-slate-400">📝 Lernkarten</span><span class="font-bold text-indigo-300">${this.cards.length}</span></div>
+            <div class="flex justify-between border-b border-slate-800 pb-2"><span class="text-sm text-slate-400">⚖️ Jus-Themen</span><span class="font-bold text-indigo-300">${this.folders.filter(f => f.subject === 'Jus').length}</span></div>
+            <div class="flex justify-between border-b border-slate-800 pb-2"><span class="text-sm text-slate-400">✍️ Germanistik-Themen</span><span class="font-bold text-indigo-300">${this.folders.filter(f => f.subject === 'Germanistik').length}</span></div>
+            <button onclick="app.forceSyncNow()" class="w-full py-3 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-xs font-bold">☁️ Jetzt synchronisieren</button>
+          </div>
+        </div>`;
+      }
+
+      updateCategoryOptions() {
+        const subject = document.getElementById('folder-subject').value;
+        const select = document.getElementById('folder-category');
+        select.innerHTML = (SUBJECT_CATEGORIES[subject] || []).map(category =>
+          `<option value="${this.escapeHtml(category)}">${this.escapeHtml(category)}</option>`
+        ).join('');
+      }
+
+      openNewFolderModal() {
+        document.getElementById('folder-subject').value = 'Jus';
+        document.getElementById('folder-name').value = '';
+        this.updateCategoryOptions();
+        const modal = document.getElementById('modal-folder');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+
+      openNewCardModal() {
+        if (!this.folders.length) {
+          alert('🌱 Lege zuerst ein Lernthema an.');
+          return;
+        }
+        const select = document.getElementById('card-folder-id');
+        select.innerHTML = this.folders.map(f =>
+          `<option value="${this.escapeHtml(f.id)}">${f.subject === 'Jus' ? '⚖️' : '✍️'} ${this.escapeHtml(f.name)}</option>`
+        ).join('');
+        document.getElementById('card-front').value = '';
+        document.getElementById('card-back').value = '';
+        const modal = document.getElementById('modal-card');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+
+      closeModal(id) {
+        const modal = document.getElementById(id);
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+
+      async saveFolderDirect() {
+        const subject = document.getElementById('folder-subject').value;
+        const name = document.getElementById('folder-name').value.trim();
+        const category = document.getElementById('folder-category').value;
+        if (!name) {
+          alert('📝 Bitte gib einen Themennamen ein.');
+          return;
+        }
+        this.folders.push({
+          id: 'topic_' + Date.now(),
+          subject,
+          name,
+          category
+        });
+        this.closeModal('modal-folder');
+        this.switchTab('topics');
+        await this.safeSync();
+      }
+
+      async saveCardDirect() {
+        const folderId = document.getElementById('card-folder-id').value;
+        const front = document.getElementById('card-front').value.trim();
+        const back = document.getElementById('card-back').value.trim();
+        if (!front || !back) {
+          alert('✏️ Bitte Frage und Antwort ausfüllen.');
+          return;
+        }
+        this.cards.push({
+          id: 'card_' + Date.now(),
+          folderId,
+          front,
+          back
+        });
+        this.closeModal('modal-card');
+        this.switchTab('topics');
+        await this.safeSync();
+      }
+
+      async forceSyncNow() {
+        const success = await this.safeSync();
+        if (success) alert('☁️ Synchronisierung erfolgreich!');
+      }
+
+      startQuizForFolder(id) {
+        this.quizQueue = this.cards.filter(card => card.folderId === id);
+        this.quizIndex = 0;
+        this.quizFlipped = false;
+        if (!this.quizQueue.length) {
+          alert('🫧 In diesem Thema gibt es noch keine Lernkarten.');
+          return;
+        }
+        this.switchTab('quiz');
+      }
+
+      flipQuizCard() {
+        this.quizFlipped = !this.quizFlipped;
+        this.switchTab('quiz');
+      }
+
+      answerQuiz() {
+        this.quizIndex++;
+        this.quizFlipped = false;
+        if (this.quizIndex >= this.quizQueue.length) {
+          alert('🎉 Runde geschafft! Die Karten starten erneut.');
+          this.quizIndex = 0;
+        }
+        this.switchTab('quiz');
+      }
+
+      escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+    }
+
+    const app = new App();
+    window.addEventListener('DOMContentLoaded', () => app.init());
+  </script>
+</body>
+</html>
